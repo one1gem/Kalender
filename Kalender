@@ -1,0 +1,2014 @@
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { Calendar, Users, Plus, X, ChevronLeft, ChevronRight, Clock, Trash2, CalendarX, AlertTriangle, StickyNote, Share2, MessageCircle, Instagram } from "lucide-react";
+
+// ---------- helpers ----------
+const PALETTE = ["#C9A227", "#2F6F62", "#8A4B3B", "#4A5C8A", "#6B4E8A", "#3B7A57", "#A24E4E", "#4E7A8A"];
+
+function pad(n) { return String(n).padStart(2, "0"); }
+function dateKey(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function startOfWeek(d) {
+  const date = new Date(d);
+  const day = (date.getDay() + 6) % 7; // Monday = 0
+  date.setDate(date.getDate() - day);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+
+function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
+function formatDateShort(dk) {
+  const [y, m, d] = dk.split("-");
+  return `${d}.${m}.`;
+}
+
+// ---------- main ----------
+export default function App() {
+  const [tab, setTab] = useState("kalender");
+  const [members, setMembers] = useState(null); // null = loading
+  const [events, setEvents] = useState(null);
+  const [absences, setAbsences] = useState(null);
+  const [notes, setNotes] = useState(null);
+  const [error, setError] = useState("");
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [showAddChoice, setShowAddChoice] = useState(null); // dateKey or null
+  const [showEventModal, setShowEventModal] = useState(null); // { dateKey } or event object
+  const [showAbsenceQuick, setShowAbsenceQuick] = useState(null); // { dateKey } or null
+  const [showNoteModal, setShowNoteModal] = useState(null); // { dateKey } or note object
+  const [showShare, setShowShare] = useState(null); // { title, text } or null
+  const [showMemberModal, setShowMemberModal] = useState(false); // create new person
+  const [showPersonAkte, setShowPersonAkte] = useState(null); // existing member object
+
+  // load
+  useEffect(() => {
+    (async () => {
+      try {
+        let m = [];
+        try {
+          const r = await window.storage.get("team-members", true);
+          m = r ? JSON.parse(r.value) : [];
+        } catch { m = []; }
+        let e = [];
+        try {
+          const r = await window.storage.get("calendar-events", true);
+          e = r ? JSON.parse(r.value) : [];
+        } catch { e = []; }
+        let a = [];
+        try {
+          const r = await window.storage.get("absences", true);
+          a = r ? JSON.parse(r.value) : [];
+        } catch { a = []; }
+        let n = [];
+        try {
+          const r = await window.storage.get("notes", true);
+          n = r ? JSON.parse(r.value) : [];
+        } catch { n = []; }
+        setMembers(m);
+        setEvents(e);
+        setAbsences(a);
+        setNotes(n);
+      } catch (err) {
+        setError("Daten konnten nicht geladen werden.");
+        setMembers([]);
+        setEvents([]);
+        setAbsences([]);
+        setNotes([]);
+      }
+    })();
+  }, []);
+
+  const saveMembers = useCallback(async (next) => {
+    setMembers(next);
+    try {
+      await window.storage.set("team-members", JSON.stringify(next), true);
+    } catch {
+      setError("Speichern fehlgeschlagen. Bitte erneut versuchen.");
+    }
+  }, []);
+
+  const saveEvents = useCallback(async (next) => {
+    setEvents(next);
+    try {
+      await window.storage.set("calendar-events", JSON.stringify(next), true);
+    } catch {
+      setError("Speichern fehlgeschlagen. Bitte erneut versuchen.");
+    }
+  }, []);
+
+  const saveAbsences = useCallback(async (next) => {
+    setAbsences(next);
+    try {
+      await window.storage.set("absences", JSON.stringify(next), true);
+    } catch {
+      setError("Speichern fehlgeschlagen. Bitte erneut versuchen.");
+    }
+  }, []);
+
+  const saveNotes = useCallback(async (next) => {
+    setNotes(next);
+    try {
+      await window.storage.set("notes", JSON.stringify(next), true);
+    } catch {
+      setError("Speichern fehlgeschlagen. Bitte erneut versuchen.");
+    }
+  }, []);
+
+  const membersById = useMemo(() => {
+    const map = {};
+    (members || []).forEach((m) => (map[m.id] = m));
+    return map;
+  }, [members]);
+
+  const loading = members === null || events === null || absences === null || notes === null;
+
+  return (
+    <div style={styles.appShell}>
+      <style>{FONT_IMPORT}</style>
+      <Sidebar tab={tab} setTab={setTab} />
+      <main style={styles.main}>
+        {error && (
+          <div style={styles.errorBanner}>
+            {error}
+            <button style={styles.errorClose} onClick={() => setError("")}>
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        {loading ? (
+          <div style={styles.loadingWrap}>Lädt…</div>
+        ) : tab === "kalender" ? (
+          <KalenderView
+            weekStart={weekStart}
+            setWeekStart={setWeekStart}
+            events={events}
+            members={members}
+            membersById={membersById}
+            absences={absences}
+            notes={notes}
+            onAddEntry={(dk) => setShowAddChoice(dk)}
+            onEditEvent={(ev) => setShowEventModal(ev)}
+            onEditNote={(n) => setShowNoteModal(n)}
+            onShare={(title, text) => setShowShare({ title, text })}
+          />
+        ) : (
+          <TeamView
+            members={members}
+            events={events}
+            absences={absences}
+            onAdd={() => setShowMemberModal(true)}
+            onOpenPerson={(m) => setShowPersonAkte(m)}
+          />
+        )}
+      </main>
+
+      {showAddChoice && (
+        <AddChoiceModal
+          onClose={() => setShowAddChoice(null)}
+          onChoose={(kind) => {
+            const dk = showAddChoice;
+            setShowAddChoice(null);
+            if (kind === "termin") setShowEventModal({ dateKey: dk });
+            if (kind === "abwesenheit") setShowAbsenceQuick({ dateKey: dk });
+            if (kind === "notiz") setShowNoteModal({ dateKey: dk });
+          }}
+        />
+      )}
+
+      {showEventModal && (
+        <EventModal
+          data={showEventModal}
+          members={members}
+          absences={absences}
+          events={events}
+          onClose={() => setShowEventModal(null)}
+          onSave={async (ev) => {
+            const exists = events.find((e) => e.id === ev.id);
+            const next = exists ? events.map((e) => (e.id === ev.id ? ev : e)) : [...events, ev];
+            await saveEvents(next);
+            setShowEventModal(null);
+          }}
+          onDelete={async (id) => {
+            await saveEvents(events.filter((e) => e.id !== id));
+            setShowEventModal(null);
+          }}
+          onShare={(title, text) => setShowShare({ title, text })}
+        />
+      )}
+
+      {showAbsenceQuick && (
+        <AbsenceQuickModal
+          members={members}
+          dateKey={showAbsenceQuick.dateKey}
+          onClose={() => setShowAbsenceQuick(null)}
+          onSave={async (a) => {
+            await saveAbsences([...absences, a]);
+            setShowAbsenceQuick(null);
+          }}
+        />
+      )}
+
+      {showNoteModal && (
+        <NoteModal
+          data={showNoteModal}
+          onClose={() => setShowNoteModal(null)}
+          onSave={async (n) => {
+            const exists = notes.find((x) => x.id === n.id);
+            const next = exists ? notes.map((x) => (x.id === n.id ? n : x)) : [...notes, n];
+            await saveNotes(next);
+            setShowNoteModal(null);
+          }}
+          onDelete={async (id) => {
+            await saveNotes(notes.filter((x) => x.id !== id));
+            setShowNoteModal(null);
+          }}
+        />
+      )}
+
+      {showMemberModal && (
+        <MemberModal
+          member={null}
+          existingCount={members.length}
+          onClose={() => setShowMemberModal(false)}
+          onSave={async (m) => {
+            await saveMembers([...members, m]);
+            setShowMemberModal(false);
+          }}
+        />
+      )}
+
+      {showPersonAkte && (
+        <PersonAkte
+          member={membersById[showPersonAkte.id] || showPersonAkte}
+          events={events}
+          absences={absences.filter((a) => a.memberId === showPersonAkte.id)}
+          onClose={() => setShowPersonAkte(null)}
+          onSaveMember={async (m) => {
+            await saveMembers(members.map((x) => (x.id === m.id ? m : x)));
+            setShowPersonAkte(m);
+          }}
+          onDeleteMember={async (id) => {
+            await saveMembers(members.filter((m) => m.id !== id));
+            await saveEvents(events.map((e) => ({ ...e, assignees: e.assignees.filter((a) => a !== id) })));
+            await saveAbsences(absences.filter((a) => a.memberId !== id));
+            setShowPersonAkte(null);
+          }}
+          onAddAbsence={async (absence) => {
+            await saveAbsences([...absences, absence]);
+          }}
+          onDeleteAbsence={async (id) => {
+            await saveAbsences(absences.filter((a) => a.id !== id));
+          }}
+        />
+      )}
+
+      {showShare && (
+        <ShareModal title={showShare.title} text={showShare.text} onClose={() => setShowShare(null)} />
+      )}
+    </div>
+  );
+}
+
+// ---------- sidebar ----------
+function Sidebar({ tab, setTab }) {
+  return (
+    <nav style={styles.sidebar}>
+      <div style={styles.brand}>
+        <div style={styles.brandMark}>TK</div>
+        <div>
+          <div style={styles.brandTitle}>Team & Kalender</div>
+          <div style={styles.brandSub}>Einsatzplanung</div>
+        </div>
+      </div>
+      <div style={styles.navList}>
+        <button
+          style={{ ...styles.navItem, ...(tab === "kalender" ? styles.navItemActive : {}) }}
+          onClick={() => setTab("kalender")}
+        >
+          <Calendar size={17} /> Kalender
+        </button>
+        <button
+          style={{ ...styles.navItem, ...(tab === "team" ? styles.navItemActive : {}) }}
+          onClick={() => setTab("team")}
+        >
+          <Users size={17} /> Team
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+// ---------- kalender ----------
+function getMonthGridDays(monthCursor) {
+  const first = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
+  const last = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0);
+  const gridStart = startOfWeek(first);
+  const gridEnd = addDays(startOfWeek(last), 6);
+  const out = [];
+  let cur = gridStart;
+  while (cur <= gridEnd) {
+    out.push(cur);
+    cur = addDays(cur, 1);
+  }
+  return out;
+}
+
+function crewOfEvent(ev, membersById) {
+  const p = membersById[ev.assignees?.[0]];
+  return p?.type;
+}
+
+function formatDateFull(dk) {
+  const [y, m, d] = dk.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function buildSingleEventText(crewLabel, personName, date, time, location, notes) {
+  const lines = [`Auftrag${crewLabel ? ` – ${crewLabel}` : ""}`];
+  if (personName) lines.push(personName);
+  lines.push(`${date ? formatDateFull(date) : ""}${time ? ` · ${time} Uhr` : ""}`.trim());
+  if (location) lines.push(`Ort: ${location}`);
+  if (notes) lines.push(notes);
+  return lines.filter(Boolean).join("\n");
+}
+
+function buildShareText(label, days, eventsByDay, notesByDay, absentByDay) {
+  const lines = [`Team & Kalender – ${label}`, ""];
+  days.forEach((d) => {
+    const dk = dateKey(d);
+    lines.push(`${WEEKDAYS[(d.getDay() + 6) % 7]} ${formatDateShort(dk)}`);
+    const evs = eventsByDay[dk] || [];
+    const dayNotes = notesByDay[dk] || [];
+    const absent = absentByDay[dk] || [];
+    if (evs.length === 0 && dayNotes.length === 0 && absent.length === 0) {
+      lines.push("—");
+    } else {
+      evs.forEach((ev) => {
+        const person = ev._personName;
+        const crew = ev._crewLabel;
+        const parts = [ev.time, ev.location, person ? `${person}${crew ? ` (${crew})` : ""}` : null, ev.notes]
+          .filter(Boolean)
+          .join(" · ");
+        lines.push(`- ${parts}`);
+      });
+      dayNotes.forEach((n) => lines.push(`- Notiz: ${n.text}`));
+      if (absent.length > 0) lines.push(`Abwesend: ${absent.map((m) => m.name).join(", ")}`);
+    }
+    lines.push("");
+  });
+  return lines.join("\n").trim();
+}
+
+function KalenderView({ weekStart, setWeekStart, events, members, membersById, absences, notes, onAddEntry, onEditEvent, onEditNote, onShare }) {
+  const [viewMode, setViewMode] = useState("woche");
+  const [monthCursor, setMonthCursor] = useState(() => new Date());
+  const [crewFilter, setCrewFilter] = useState("alle");
+
+  const days = useMemo(
+    () => (viewMode === "woche" ? Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)) : getMonthGridDays(monthCursor)),
+    [viewMode, weekStart, monthCursor]
+  );
+
+  const eventsByDay = useMemo(() => {
+    const map = {};
+    days.forEach((d) => (map[dateKey(d)] = []));
+    (events || []).forEach((e) => {
+      if (!map[e.date]) return;
+      if (crewFilter !== "alle" && crewOfEvent(e, membersById) !== crewFilter) return;
+      const person = membersById[e.assignees?.[0]];
+      map[e.date].push({
+        ...e,
+        _personName: person?.name,
+        _crewLabel: person ? (person.type === "fest" ? "One Gem" : "Beguna") : null,
+      });
+    });
+    Object.values(map).forEach((list) => list.sort((a, b) => (a.time || "").localeCompare(b.time || "")));
+    return map;
+  }, [events, days, crewFilter, membersById]);
+
+  const notesByDay = useMemo(() => {
+    const map = {};
+    days.forEach((d) => (map[dateKey(d)] = []));
+    (notes || []).forEach((n) => {
+      if (map[n.date]) map[n.date].push(n);
+    });
+    return map;
+  }, [notes, days]);
+
+  const absentByDay = useMemo(() => {
+    const map = {};
+    days.forEach((d) => {
+      const dk = dateKey(d);
+      map[dk] = (members || [])
+        .filter((m) => (crewFilter === "alle" ? true : m.type === crewFilter))
+        .filter((m) => (absences || []).some((a) => a.memberId === m.id && dk >= a.startDate && dk <= a.endDate));
+    });
+    return map;
+  }, [absences, members, days, crewFilter]);
+
+  const conflictDays = useMemo(() => {
+    const set = new Set();
+    Object.entries(eventsByDay).forEach(([dk, list]) => {
+      const seen = new Set();
+      list.forEach((ev) => {
+        (ev.assignees || []).forEach((id) => {
+          if (seen.has(id)) set.add(dk);
+          seen.add(id);
+        });
+      });
+    });
+    return set;
+  }, [eventsByDay]);
+
+  const maxLoad = useMemo(() => {
+    let max = 1;
+    Object.values(eventsByDay).forEach((list) => {
+      const count = new Set(list.flatMap((e) => e.assignees)).size;
+      if (count > max) max = count;
+    });
+    return max;
+  }, [eventsByDay]);
+
+  const todayKey = dateKey(new Date());
+
+  const weekLabel = viewMode === "woche"
+    ? `${MONTHS[days[0].getMonth()]}${days[0].getMonth() !== days[6].getMonth() ? " / " + MONTHS[days[6].getMonth()] : ""} ${days[6].getFullYear()}`
+    : `${MONTHS[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`;
+
+  const shareWeek = () => {
+    onShare("Woche teilen", buildShareText(weekLabel, days, eventsByDay, notesByDay, absentByDay));
+  };
+
+  const shareDay = (d) => {
+    const dk = dateKey(d);
+    onShare(
+      "Tag teilen",
+      buildShareText(`${WEEKDAYS[(d.getDay() + 6) % 7]} ${formatDateShort(dk)}`, [d], eventsByDay, notesByDay, absentByDay)
+    );
+  };
+
+  const shareEvent = (ev) => {
+    onShare("Auftrag teilen", buildSingleEventText(ev._crewLabel, ev._personName, ev.date, ev.time, ev.location, ev.notes));
+  };
+
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <div>
+          <div style={styles.eyebrow}>{viewMode === "woche" ? "Woche" : "Monat"}</div>
+          <h1 style={styles.pageTitle}>{weekLabel}</h1>
+        </div>
+        <div style={styles.weekNav}>
+          <div style={styles.viewToggle}>
+            <button
+              style={{ ...styles.viewToggleBtn, ...(viewMode === "woche" ? styles.viewToggleBtnActive : {}) }}
+              onClick={() => setViewMode("woche")}
+            >
+              Woche
+            </button>
+            <button
+              style={{ ...styles.viewToggleBtn, ...(viewMode === "monat" ? styles.viewToggleBtnActive : {}) }}
+              onClick={() => setViewMode("monat")}
+            >
+              Monat
+            </button>
+          </div>
+          <button
+            style={styles.iconBtn}
+            onClick={() =>
+              viewMode === "woche"
+                ? setWeekStart(addDays(weekStart, -7))
+                : setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))
+            }
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <button
+            style={styles.todayBtn}
+            onClick={() => {
+              setWeekStart(startOfWeek(new Date()));
+              setMonthCursor(new Date());
+            }}
+          >
+            Heute
+          </button>
+          <button
+            style={styles.iconBtn}
+            onClick={() =>
+              viewMode === "woche"
+                ? setWeekStart(addDays(weekStart, 7))
+                : setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))
+            }
+          >
+            <ChevronRight size={18} />
+          </button>
+          <button style={styles.ghostBtn} onClick={shareWeek}>
+            <Share2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+            Teilen
+          </button>
+          <button style={styles.primaryBtn} onClick={() => onAddEntry(todayKey)}>
+            <Plus size={16} /> Neu
+          </button>
+        </div>
+      </div>
+
+      <div style={styles.filterRow}>
+        <span style={styles.filterLabel}>Anzeigen:</span>
+        <div style={styles.segmented}>
+          <button
+            style={{ ...styles.segBtn, ...(crewFilter === "alle" ? styles.segBtnActive : {}) }}
+            onClick={() => setCrewFilter("alle")}
+          >
+            Alle
+          </button>
+          <button
+            style={{ ...styles.segBtn, ...(crewFilter === "fest" ? styles.segBtnActive : {}) }}
+            onClick={() => setCrewFilter("fest")}
+          >
+            One Gem
+          </button>
+          <button
+            style={{ ...styles.segBtn, ...(crewFilter === "frei" ? styles.segBtnActive : {}) }}
+            onClick={() => setCrewFilter("frei")}
+          >
+            Beguna
+          </button>
+        </div>
+      </div>
+
+      {viewMode === "woche" ? (
+        <div style={styles.weekGrid}>
+          {days.map((d) => {
+            const dk = dateKey(d);
+            const list = eventsByDay[dk] || [];
+            const dayNotes = notesByDay[dk] || [];
+            const load = new Set(list.flatMap((e) => e.assignees)).size;
+            const isToday = dk === todayKey;
+            const hasConflict = conflictDays.has(dk);
+            return (
+              <div key={dk} style={{ ...styles.dayCol, ...(isToday ? styles.dayColToday : {}) }}>
+                <div style={styles.dayHead}>
+                  <div>
+                    <div style={styles.dayName}>{WEEKDAYS[(d.getDay() + 6) % 7]}</div>
+                    <div style={{ ...styles.dayNum, ...(isToday ? styles.dayNumToday : {}) }}>{d.getDate()}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button style={styles.addDayBtn} onClick={() => shareDay(d)} title="Tag teilen">
+                      <Share2 size={12} />
+                    </button>
+                    <button style={styles.addDayBtn} onClick={() => onAddEntry(dk)} title="Eintrag hinzufügen">
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                </div>
+                <div style={styles.loadBarTrack}>
+                  <div style={{ ...styles.loadBarFill, width: `${(load / maxLoad) * 100}%` }} />
+                </div>
+                {hasConflict && (
+                  <div style={styles.conflictTag}>
+                    <AlertTriangle size={10} /> Doppelbuchung
+                  </div>
+                )}
+                <div style={styles.dayEvents}>
+                  {list.length === 0 && dayNotes.length === 0 && (absentByDay[dk] || []).length === 0 && (
+                    <div style={styles.emptyDay}>—</div>
+                  )}
+                  {list.map((ev) => (
+                    <div key={ev.id} style={styles.eventCard}>
+                      <button style={styles.eventCardMain} onClick={() => onEditEvent(ev)}>
+                        {ev.time && (
+                          <div style={styles.eventTime}>
+                            <Clock size={11} /> {ev.time}
+                          </div>
+                        )}
+                        <div style={styles.eventTitle}>{ev.location || ev._personName || "Termin"}</div>
+                        {ev.notes && <div style={styles.eventLocation}>{ev.notes}</div>}
+                        {ev._personName && (
+                          <div style={styles.avatarRow}>
+                            <div
+                              style={{ ...styles.avatar, background: membersById[ev.assignees[0]]?.color }}
+                              title={`${ev._crewLabel} · ${ev._personName}`}
+                            >
+                              {ev._personName.slice(0, 1).toUpperCase()}
+                            </div>
+                            <span style={styles.avatarName}>{ev._personName}</span>
+                          </div>
+                        )}
+                      </button>
+                      <button
+                        style={styles.eventShareBtn}
+                        onClick={() => shareEvent(ev)}
+                        title="Auftrag teilen"
+                      >
+                        <Share2 size={11} />
+                      </button>
+                    </div>
+                  ))}
+                  {dayNotes.map((n) => (
+                    <button key={n.id} style={styles.noteCard} onClick={() => onEditNote(n)}>
+                      <div style={styles.noteHead}>
+                        <StickyNote size={11} /> Notiz
+                      </div>
+                      <div style={styles.noteText}>{n.text}</div>
+                    </button>
+                  ))}
+                </div>
+                {(absentByDay[dk] || []).length > 0 && (
+                  <div style={styles.absentRow}>
+                    <CalendarX size={11} style={{ flexShrink: 0, color: "#9A6B4E" }} />
+                    <div style={styles.absentNames}>{absentByDay[dk].map((m) => m.name).join(", ")}</div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={styles.monthGrid}>
+          {WEEKDAYS.map((w) => (
+            <div key={w} style={styles.monthWeekdayLabel}>
+              {w}
+            </div>
+          ))}
+          {days.map((d) => {
+            const dk = dateKey(d);
+            const list = eventsByDay[dk] || [];
+            const dayNotes = notesByDay[dk] || [];
+            const absent = absentByDay[dk] || [];
+            const isToday = dk === todayKey;
+            const inMonth = d.getMonth() === monthCursor.getMonth();
+            const hasConflict = conflictDays.has(dk);
+            return (
+              <button
+                key={dk}
+                style={{
+                  ...styles.monthCell,
+                  ...(isToday ? styles.monthCellToday : {}),
+                  ...(!inMonth ? styles.monthCellOutside : {}),
+                }}
+                onClick={() => {
+                  setWeekStart(startOfWeek(d));
+                  setViewMode("woche");
+                }}
+              >
+                <div style={styles.monthCellHead}>
+                  <span style={{ ...styles.monthCellNum, ...(isToday ? styles.dayNumToday : {}) }}>{d.getDate()}</span>
+                  {hasConflict && <AlertTriangle size={10} color="#A24E4E" />}
+                </div>
+                <div style={styles.monthCellDots}>
+                  {list.slice(0, 3).map((ev) => (
+                    <div key={ev.id} style={{ ...styles.monthDot, background: membersById[ev.assignees?.[0]]?.color || "#8A93A0" }} />
+                  ))}
+                  {dayNotes.length > 0 && <div style={{ ...styles.monthDot, background: "#C9A227" }} />}
+                  {absent.length > 0 && <CalendarX size={10} color="#9A6B4E" />}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- team ----------
+function TeamView({ members, events, absences, onAdd, onOpenPerson }) {
+  const fixed = members.filter((m) => m.type === "fest");
+  const freelance = members.filter((m) => m.type === "frei");
+  const todayKey = dateKey(new Date());
+
+  const upcomingCount = (id) => {
+    return events.filter((e) => e.assignees.includes(id) && e.date >= todayKey).length;
+  };
+
+  const activeAbsence = (id) => {
+    return (absences || [])
+      .filter((a) => a.memberId === id && a.endDate >= todayKey)
+      .sort((a, b) => a.startDate.localeCompare(b.startDate))[0];
+  };
+
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <div>
+          <div style={styles.eyebrow}>Besetzung</div>
+          <h1 style={styles.pageTitle}>Team</h1>
+        </div>
+        <button style={styles.primaryBtn} onClick={onAdd}>
+          <Plus size={16} /> Person hinzufügen
+        </button>
+      </div>
+
+      <TeamGroup
+        label="One Gem Crew"
+        count={fixed.length}
+        people={fixed}
+        upcomingCount={upcomingCount}
+        activeAbsence={activeAbsence}
+        onOpenPerson={onOpenPerson}
+      />
+      <TeamGroup
+        label="Beguna Crew"
+        count={freelance.length}
+        people={freelance}
+        upcomingCount={upcomingCount}
+        activeAbsence={activeAbsence}
+        onOpenPerson={onOpenPerson}
+      />
+    </div>
+  );
+}
+
+function TeamGroup({ label, count, people, upcomingCount, activeAbsence, onOpenPerson }) {
+  return (
+    <div style={{ marginBottom: 32 }}>
+      <div style={styles.groupHead}>
+        <span style={styles.groupLabel}>{label}</span>
+        <span style={styles.groupCount}>{count}</span>
+      </div>
+      {people.length === 0 ? (
+        <div style={styles.emptyGroup}>Noch niemand eingetragen.</div>
+      ) : (
+        <div style={styles.peopleGrid}>
+          {people.map((m) => {
+            const absence = activeAbsence(m.id);
+            return (
+              <button key={m.id} style={styles.personCard} onClick={() => onOpenPerson(m)}>
+                <div style={{ ...styles.personAvatar, background: m.color }}>{m.name.slice(0, 1).toUpperCase()}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={styles.personName}>{m.name}</div>
+                  <div style={styles.personMeta}>
+                    {m.role ? m.role + " · " : ""}
+                    {upcomingCount(m.id)} anstehende Termine
+                  </div>
+                  {absence && (
+                    <div style={styles.absenceTag}>
+                      <CalendarX size={11} /> Abwesend {formatDateShort(absence.startDate)}
+                      {absence.endDate !== absence.startDate ? `–${formatDateShort(absence.endDate)}` : ""}
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- modals ----------
+function MemberModal({ member, existingCount, onClose, onSave }) {
+  const [name, setName] = useState(member?.name || "");
+  const [role, setRole] = useState(member?.role || "");
+  const [type, setType] = useState(member?.type || "frei");
+  const [color, setColor] = useState(member?.color || PALETTE[existingCount % PALETTE.length]);
+
+  const canSave = name.trim().length > 0;
+
+  return (
+    <ModalShell onClose={onClose} title={member ? "Person bearbeiten" : "Person hinzufügen"}>
+      <Field label="Name">
+        <input
+          style={styles.input}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="z. B. Mira Voss"
+          autoFocus
+        />
+      </Field>
+      <Field label="Rolle (optional)">
+        <input
+          style={styles.input}
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+          placeholder="z. B. Grafik, Fotografie…"
+        />
+      </Field>
+      <Field label="Status">
+        <div style={styles.segmented}>
+          <button
+            style={{ ...styles.segBtn, ...(type === "fest" ? styles.segBtnActive : {}) }}
+            onClick={() => setType("fest")}
+          >
+            One Gem Crew
+          </button>
+          <button
+            style={{ ...styles.segBtn, ...(type === "frei" ? styles.segBtnActive : {}) }}
+            onClick={() => setType("frei")}
+          >
+            Beguna Crew
+          </button>
+        </div>
+      </Field>
+      <Field label="Farbe">
+        <div style={styles.colorRow}>
+          {PALETTE.map((c) => (
+            <button
+              key={c}
+              style={{
+                ...styles.colorSwatch,
+                background: c,
+                outline: color === c ? "2px solid #1B1E24" : "none",
+                outlineOffset: 2,
+              }}
+              onClick={() => setColor(c)}
+            />
+          ))}
+        </div>
+      </Field>
+      <div style={styles.modalFooter}>
+        <button style={styles.ghostBtn} onClick={onClose}>
+          Abbrechen
+        </button>
+        <button
+          style={{ ...styles.primaryBtn, opacity: canSave ? 1 : 0.5 }}
+          disabled={!canSave}
+          onClick={() =>
+            onSave({
+              id: member?.id || uid(),
+              name: name.trim(),
+              role: role.trim(),
+              type,
+              color,
+            })
+          }
+        >
+          Speichern
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function PersonAkte({ member, events, absences, onClose, onSaveMember, onDeleteMember, onAddAbsence, onDeleteAbsence }) {
+  const [name, setName] = useState(member.name);
+  const [role, setRole] = useState(member.role || "");
+  const [type, setType] = useState(member.type);
+  const [color, setColor] = useState(member.color);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const [absStart, setAbsStart] = useState(dateKey(new Date()));
+  const [absEnd, setAbsEnd] = useState(dateKey(new Date()));
+  const [absReason, setAbsReason] = useState("");
+
+  const todayKey = dateKey(new Date());
+  const upcomingEvents = events
+    .filter((e) => e.assignees.includes(member.id) && e.date >= todayKey)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 5);
+
+  const sortedAbsences = [...absences].sort((a, b) => a.startDate.localeCompare(b.startDate));
+
+  const canSaveMember = name.trim().length > 0;
+  const canAddAbsence = absStart && absEnd && absEnd >= absStart;
+
+  const dirty = name !== member.name || role !== (member.role || "") || type !== member.type || color !== member.color;
+
+  return (
+    <ModalShell onClose={onClose} title="Personen-Akte">
+      <div style={styles.akteHead}>
+        <div style={{ ...styles.personAvatar, background: color, width: 44, height: 44, fontSize: 17 }}>
+          {name.slice(0, 1).toUpperCase() || "?"}
+        </div>
+        <div style={styles.akteHeadCrew}>{type === "fest" ? "One Gem Crew" : "Beguna Crew"}</div>
+      </div>
+
+      <Field label="Name">
+        <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <Field label="Rolle (optional)">
+        <input
+          style={styles.input}
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+          placeholder="z. B. Grafik, Fotografie…"
+        />
+      </Field>
+      <Field label="Crew">
+        <div style={styles.segmented}>
+          <button
+            style={{ ...styles.segBtn, ...(type === "fest" ? styles.segBtnActive : {}) }}
+            onClick={() => setType("fest")}
+          >
+            One Gem Crew
+          </button>
+          <button
+            style={{ ...styles.segBtn, ...(type === "frei" ? styles.segBtnActive : {}) }}
+            onClick={() => setType("frei")}
+          >
+            Beguna Crew
+          </button>
+        </div>
+      </Field>
+      <Field label="Farbe">
+        <div style={styles.colorRow}>
+          {PALETTE.map((c) => (
+            <button
+              key={c}
+              style={{
+                ...styles.colorSwatch,
+                background: c,
+                outline: color === c ? "2px solid #1B1E24" : "none",
+                outlineOffset: 2,
+              }}
+              onClick={() => setColor(c)}
+            />
+          ))}
+        </div>
+      </Field>
+      {dirty && (
+        <button
+          style={{ ...styles.primaryBtn, opacity: canSaveMember ? 1 : 0.5, marginBottom: 20 }}
+          disabled={!canSaveMember}
+          onClick={() => onSaveMember({ ...member, name: name.trim(), role: role.trim(), type, color })}
+        >
+          Änderungen speichern
+        </button>
+      )}
+
+      <div style={styles.akteDivider} />
+
+      <div style={styles.akteSectionLabel}>Anstehende Termine</div>
+      {upcomingEvents.length === 0 ? (
+        <div style={styles.emptyGroup}>Keine anstehenden Termine.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 18 }}>
+          {upcomingEvents.map((e) => (
+            <div key={e.id} style={styles.akteEventLine}>
+              <span style={styles.akteEventDate}>{formatDateShort(e.date)}</span> {e.location || e.notes || "Termin"}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={styles.akteDivider} />
+
+      <div style={styles.akteSectionLabel}>
+        <CalendarX size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
+        Abwesenheiten
+      </div>
+
+      {sortedAbsences.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+          {sortedAbsences.map((a) => (
+            <div key={a.id} style={styles.absenceListItem}>
+              <div style={{ flex: 1, fontSize: 12.5 }}>
+                {formatDateShort(a.startDate)}
+                {a.endDate !== a.startDate ? ` – ${formatDateShort(a.endDate)}` : ""}
+                {a.reason ? ` · ${a.reason}` : ""}
+              </div>
+              <button style={styles.smallIconBtnDanger} onClick={() => onDeleteAbsence(a.id)} title="Entfernen">
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={styles.absenceForm}>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Field label="Von" style={{ flex: 1, marginBottom: 10 }}>
+            <input
+              style={styles.input}
+              type="date"
+              value={absStart}
+              onChange={(e) => {
+                setAbsStart(e.target.value);
+                if (e.target.value > absEnd) setAbsEnd(e.target.value);
+              }}
+            />
+          </Field>
+          <Field label="Bis" style={{ flex: 1, marginBottom: 10 }}>
+            <input style={styles.input} type="date" value={absEnd} onChange={(e) => setAbsEnd(e.target.value)} />
+          </Field>
+        </div>
+        <Field label="Grund (optional)" style={{ marginBottom: 10 }}>
+          <input
+            style={styles.input}
+            value={absReason}
+            onChange={(e) => setAbsReason(e.target.value)}
+            placeholder="z. B. Urlaub, Krankheit…"
+          />
+        </Field>
+        <button
+          style={{ ...styles.ghostBtn, opacity: canAddAbsence ? 1 : 0.5, width: "100%" }}
+          disabled={!canAddAbsence}
+          onClick={() => {
+            onAddAbsence({ id: uid(), memberId: member.id, startDate: absStart, endDate: absEnd, reason: absReason.trim() });
+            setAbsReason("");
+          }}
+        >
+          <CalendarX size={14} style={{ marginRight: 6, verticalAlign: -3 }} />
+          Abwesenheit hinzufügen
+        </button>
+      </div>
+
+      <div style={styles.akteDivider} />
+
+      <div style={styles.modalFooter}>
+        {confirmDelete ? (
+          <>
+            <span style={{ fontSize: 12.5, color: "#A24E4E", alignSelf: "center", marginRight: "auto" }}>
+              Person wirklich entfernen?
+            </span>
+            <button style={styles.ghostBtn} onClick={() => setConfirmDelete(false)}>
+              Abbrechen
+            </button>
+            <button style={styles.dangerGhostBtn} onClick={() => onDeleteMember(member.id)}>
+              <Trash2 size={14} /> Endgültig entfernen
+            </button>
+          </>
+        ) : (
+          <>
+            <button style={styles.dangerGhostBtn} onClick={() => setConfirmDelete(true)}>
+              <Trash2 size={14} /> Person entfernen
+            </button>
+            <div style={{ flex: 1 }} />
+            <button style={styles.ghostBtn} onClick={onClose}>
+              Schließen
+            </button>
+          </>
+        )}
+      </div>
+    </ModalShell>
+  );
+}
+
+function EventModal({ data, members, absences, events, onClose, onSave, onDelete, onShare }) {
+  const initialPersonId = data.assignees?.[0] || "";
+  const initialCrew = initialPersonId ? members.find((m) => m.id === initialPersonId)?.type : data.crewType;
+  const [crewType, setCrewType] = useState(initialCrew || "fest");
+  const [personId, setPersonId] = useState(initialPersonId);
+  const [date, setDate] = useState(data.date || data.dateKey);
+  const [time, setTime] = useState(data.time || "");
+  const [location, setLocation] = useState(data.location || "");
+  const [notes, setNotes] = useState(data.notes || "");
+
+  const crewMembers = members.filter((m) => m.type === crewType);
+  const person = members.find((m) => m.id === personId);
+  const crewLabel = crewType === "fest" ? "One Gem" : "Beguna";
+
+  const isAbsent =
+    person && (absences || []).some((a) => a.memberId === person.id && date >= a.startDate && date <= a.endDate);
+
+  const conflictEvent =
+    person &&
+    date &&
+    (events || []).find(
+      (e) => e.id !== data.id && e.date === date && (e.assignees || []).includes(person.id)
+    );
+
+  const canSave = personId && date;
+
+  return (
+    <ModalShell onClose={onClose} title={data.id ? "Termin bearbeiten" : "Neuer Termin eintragen"}>
+      <Field label="Crew">
+        <div style={styles.segmented}>
+          <button
+            style={{ ...styles.segBtn, ...(crewType === "fest" ? styles.segBtnActive : {}) }}
+            onClick={() => {
+              setCrewType("fest");
+              if (person && person.type !== "fest") setPersonId("");
+            }}
+          >
+            One Gem
+          </button>
+          <button
+            style={{ ...styles.segBtn, ...(crewType === "frei" ? styles.segBtnActive : {}) }}
+            onClick={() => {
+              setCrewType("frei");
+              if (person && person.type !== "frei") setPersonId("");
+            }}
+          >
+            Beguna
+          </button>
+        </div>
+      </Field>
+
+      <Field label="Person Auswahl">
+        {crewMembers.length === 0 ? (
+          <div style={styles.emptyGroup}>Noch niemand in dieser Crew.</div>
+        ) : (
+          <div style={styles.assigneeList}>
+            {crewMembers.map((m) => (
+              <button
+                key={m.id}
+                style={{
+                  ...styles.assigneeChip,
+                  ...(personId === m.id ? { background: m.color, color: "#fff", borderColor: m.color } : {}),
+                }}
+                onClick={() => setPersonId(m.id)}
+              >
+                {m.name}
+              </button>
+            ))}
+          </div>
+        )}
+        {person && (
+          <div style={styles.previewBox}>
+            <div style={styles.previewLine}>
+              <strong>{crewLabel}</strong> → {person.name} wird bei{" "}
+              <strong>{location.trim() ? location.trim() : "…"}</strong>{" "}
+              {notes.trim() ? notes.trim() : ""} machen
+            </div>
+            {isAbsent && (
+              <div style={styles.absentWarning}>
+                <AlertTriangle size={12} /> {person.name} ist an diesem Tag als abwesend eingetragen
+              </div>
+            )}
+            {conflictEvent && (
+              <div style={styles.absentWarning}>
+                <AlertTriangle size={12} /> {person.name} hat an diesem Tag bereits einen Termin
+                {conflictEvent.location ? ` (${conflictEvent.location})` : ""}
+              </div>
+            )}
+          </div>
+        )}
+      </Field>
+
+      <div style={{ display: "flex", gap: 12 }}>
+        <Field label="Datum" style={{ flex: 1 }}>
+          <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+        <Field label="Uhrzeit (optional)" style={{ flex: 1 }}>
+          <input style={styles.input} type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+        </Field>
+      </div>
+
+      <Field label="Ort">
+        <input
+          style={styles.input}
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          placeholder="z. B. Motel One München"
+        />
+      </Field>
+
+      <Field label="Notiz">
+        <textarea
+          style={{ ...styles.input, minHeight: 64, resize: "vertical", fontFamily: "inherit" }}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="z. B. Video machen"
+        />
+      </Field>
+
+      <div style={styles.modalFooter}>
+        {data.id && (
+          <button style={styles.dangerGhostBtn} onClick={() => onDelete(data.id)}>
+            <Trash2 size={14} /> Löschen
+          </button>
+        )}
+        {data.id && person && (
+          <button
+            style={styles.ghostBtn}
+            onClick={() => onShare("Auftrag teilen", buildSingleEventText(crewLabel, person.name, date, time, location, notes))}
+          >
+            <Share2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+            Teilen
+          </button>
+        )}
+        <div style={{ flex: 1 }} />
+        <button style={styles.ghostBtn} onClick={onClose}>
+          Abbrechen
+        </button>
+        <button
+          style={{ ...styles.primaryBtn, opacity: canSave ? 1 : 0.5 }}
+          disabled={!canSave}
+          onClick={() =>
+            onSave({
+              id: data.id || uid(),
+              date,
+              time,
+              crewType,
+              location: location.trim(),
+              notes: notes.trim(),
+              assignees: personId ? [personId] : [],
+            })
+          }
+        >
+          Speichern
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ---------- teilen ----------
+function ShareModal({ title, text, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const [igCopied, setIgCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  const handleInstagram = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setIgCopied(true);
+      setTimeout(() => setIgCopied(false), 2500);
+    } catch {
+      setIgCopied(false);
+    }
+    window.open("https://www.instagram.com/direct/inbox/", "_blank", "noopener,noreferrer");
+  };
+
+  const waLink = `https://wa.me/?text=${encodeURIComponent(text)}`;
+
+  return (
+    <ModalShell onClose={onClose} title={title}>
+      <textarea
+        readOnly
+        value={text}
+        onFocus={(e) => e.target.select()}
+        style={{ ...styles.input, minHeight: 220, resize: "vertical", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5 }}
+      />
+
+      <div style={styles.shareChannelRow}>
+        <a href={waLink} target="_blank" rel="noopener noreferrer" style={styles.shareChannelBtn}>
+          <MessageCircle size={15} /> Per WhatsApp senden
+        </a>
+        <button style={styles.shareChannelBtn} onClick={handleInstagram}>
+          <Instagram size={15} /> {igCopied ? "Kopiert – Instagram öffnet…" : "Für Instagram kopieren"}
+        </button>
+      </div>
+      <div style={styles.shareHint}>
+        Instagram erlaubt kein automatisches Einfügen – der Text wird kopiert, dann einfach in den Chat einfügen.
+      </div>
+
+      <div style={styles.modalFooter}>
+        <button style={styles.ghostBtn} onClick={onClose}>
+          Schließen
+        </button>
+        <button style={styles.primaryBtn} onClick={handleCopy}>
+          {copied ? "Kopiert ✓" : "Text kopieren"}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ---------- add choice / abwesenheit / notiz ----------
+function AddChoiceModal({ onClose, onChoose }) {
+  const options = [
+    { key: "termin", label: "Termin", desc: "Einsatz mit Crew planen", icon: Calendar },
+    { key: "abwesenheit", label: "Abwesenheit", desc: "Person als abwesend eintragen", icon: CalendarX },
+    { key: "notiz", label: "Notiz", desc: "Freien Vermerk zum Tag hinzufügen", icon: StickyNote },
+  ];
+  return (
+    <ModalShell onClose={onClose} title="Neuer Eintrag">
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {options.map((o) => (
+          <button key={o.key} style={styles.choiceCard} onClick={() => onChoose(o.key)}>
+            <div style={styles.choiceIcon}>
+              <o.icon size={18} />
+            </div>
+            <div>
+              <div style={styles.choiceLabel}>{o.label}</div>
+              <div style={styles.choiceDesc}>{o.desc}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </ModalShell>
+  );
+}
+
+function AbsenceQuickModal({ members, dateKey: dk, onClose, onSave }) {
+  const [memberId, setMemberId] = useState(members[0]?.id || "");
+  const [startDate, setStartDate] = useState(dk);
+  const [endDate, setEndDate] = useState(dk);
+  const [reason, setReason] = useState("");
+
+  const canSave = memberId && startDate && endDate && endDate >= startDate;
+
+  return (
+    <ModalShell onClose={onClose} title="Abwesenheit eintragen">
+      <Field label="Person">
+        {members.length === 0 ? (
+          <div style={styles.emptyGroup}>Noch keine Personen im Team.</div>
+        ) : (
+          <>
+            {[
+              { key: "fest", label: "One Gem Crew" },
+              { key: "frei", label: "Beguna Crew" },
+            ].map(({ key, label }) => {
+              const group = members.filter((m) => m.type === key);
+              if (group.length === 0) return null;
+              return (
+                <div key={key} style={{ marginBottom: 8 }}>
+                  <div style={styles.assigneeGroupLabel}>{label}</div>
+                  <div style={styles.assigneeList}>
+                    {group.map((m) => (
+                      <button
+                        key={m.id}
+                        style={{
+                          ...styles.assigneeChip,
+                          ...(memberId === m.id ? { background: m.color, color: "#fff", borderColor: m.color } : {}),
+                        }}
+                        onClick={() => setMemberId(m.id)}
+                      >
+                        {m.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </Field>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Field label="Von" style={{ flex: 1 }}>
+          <input
+            style={styles.input}
+            type="date"
+            value={startDate}
+            onChange={(e) => {
+              setStartDate(e.target.value);
+              if (e.target.value > endDate) setEndDate(e.target.value);
+            }}
+          />
+        </Field>
+        <Field label="Bis" style={{ flex: 1 }}>
+          <input style={styles.input} type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Grund (optional)">
+        <input
+          style={styles.input}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="z. B. Urlaub, Krankheit…"
+        />
+      </Field>
+      <div style={styles.modalFooter}>
+        <button style={styles.ghostBtn} onClick={onClose}>
+          Abbrechen
+        </button>
+        <button
+          style={{ ...styles.primaryBtn, opacity: canSave ? 1 : 0.5 }}
+          disabled={!canSave}
+          onClick={() => onSave({ id: uid(), memberId, startDate, endDate, reason: reason.trim() })}
+        >
+          Speichern
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function NoteModal({ data, onClose, onSave, onDelete }) {
+  const [date, setDate] = useState(data.date || data.dateKey);
+  const [text, setText] = useState(data.text || "");
+
+  const canSave = text.trim().length > 0 && date;
+
+  return (
+    <ModalShell onClose={onClose} title={data.id ? "Notiz bearbeiten" : "Neue Notiz"}>
+      <Field label="Datum">
+        <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </Field>
+      <Field label="Notiz">
+        <textarea
+          style={{ ...styles.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Was gibt es zu vermerken?"
+          autoFocus
+        />
+      </Field>
+      <div style={styles.modalFooter}>
+        {data.id && (
+          <button style={styles.dangerGhostBtn} onClick={() => onDelete(data.id)}>
+            <Trash2 size={14} /> Löschen
+          </button>
+        )}
+        <div style={{ flex: 1 }} />
+        <button style={styles.ghostBtn} onClick={onClose}>
+          Abbrechen
+        </button>
+        <button
+          style={{ ...styles.primaryBtn, opacity: canSave ? 1 : 0.5 }}
+          disabled={!canSave}
+          onClick={() => onSave({ id: data.id || uid(), date, text: text.trim() })}
+        >
+          Speichern
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function ModalShell({ title, onClose, children }) {
+  return (
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHead}>
+          <h2 style={styles.modalTitle}>{title}</h2>
+          <button style={styles.iconBtn} onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+        <div style={styles.modalBody}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children, style }) {
+  return (
+    <div style={{ marginBottom: 16, ...style }}>
+      <label style={styles.label}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+// ---------- styles ----------
+const FONT_IMPORT = `
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap');
+`;
+
+const ink = "#1B1E24";
+const paper = "#EEF0F2";
+const paperCard = "#FFFFFF";
+const line = "#DADFE4";
+const gold = "#C9A227";
+const teal = "#2F6F62";
+
+const styles = {
+  appShell: {
+    display: "flex",
+    minHeight: "100vh",
+    width: "100%",
+    background: paper,
+    color: ink,
+    fontFamily: "'Inter', sans-serif",
+  },
+  sidebar: {
+    width: 220,
+    background: ink,
+    color: "#F2F1EC",
+    display: "flex",
+    flexDirection: "column",
+    padding: "24px 16px",
+    flexShrink: 0,
+  },
+  brand: { display: "flex", alignItems: "center", gap: 10, marginBottom: 28, padding: "0 8px" },
+  brandMark: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    background: gold,
+    color: ink,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Space Grotesk', sans-serif",
+    fontWeight: 700,
+    fontSize: 13,
+    flexShrink: 0,
+  },
+  brandTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14, lineHeight: 1.3 },
+  brandSub: { fontSize: 11, color: "#9BA3AE", marginTop: 1 },
+  navList: { display: "flex", flexDirection: "column", gap: 4 },
+  navItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 12px",
+    borderRadius: 8,
+    border: "none",
+    background: "transparent",
+    color: "#C3C8D1",
+    fontSize: 14,
+    fontWeight: 500,
+    cursor: "pointer",
+    textAlign: "left",
+    fontFamily: "inherit",
+  },
+  navItemActive: { background: "#2A2E37", color: "#FFFFFF" },
+  main: { flex: 1, padding: "32px 40px", overflowY: "auto" },
+  errorBanner: {
+    background: "#F6E4E1",
+    color: "#8A3B2E",
+    padding: "10px 14px",
+    borderRadius: 8,
+    marginBottom: 16,
+    fontSize: 13,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  errorClose: { background: "none", border: "none", cursor: "pointer", color: "#8A3B2E" },
+  loadingWrap: { padding: 60, textAlign: "center", color: "#8A93A0", fontSize: 14 },
+  pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 24 },
+  eyebrow: {
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 11,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "#8A93A0",
+    marginBottom: 4,
+  },
+  pageTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 26, margin: 0 },
+  weekNav: { display: "flex", alignItems: "center", gap: 6 },
+  viewToggle: {
+    display: "flex",
+    border: `1px solid ${line}`,
+    borderRadius: 8,
+    overflow: "hidden",
+    marginRight: 4,
+  },
+  viewToggleBtn: {
+    padding: "0 12px",
+    height: 32,
+    border: "none",
+    background: paperCard,
+    fontSize: 12.5,
+    fontWeight: 500,
+    color: "#5A6270",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  viewToggleBtnActive: { background: ink, color: "#fff" },
+  filterRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 16 },
+  filterLabel: { fontSize: 12.5, color: "#8A93A0", fontWeight: 500 },
+  conflictTag: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 10,
+    color: "#A24E4E",
+    fontWeight: 600,
+    marginBottom: 6,
+  },
+  monthGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, 1fr)",
+    gap: 6,
+  },
+  monthWeekdayLabel: {
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 10.5,
+    color: "#8A93A0",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    textAlign: "center",
+    padding: "0 0 4px",
+  },
+  monthCell: {
+    background: paperCard,
+    border: `1px solid ${line}`,
+    borderRadius: 8,
+    minHeight: 62,
+    padding: 8,
+    cursor: "pointer",
+    textAlign: "left",
+    fontFamily: "inherit",
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  monthCellToday: { borderColor: gold, boxShadow: `0 0 0 1px ${gold}` },
+  monthCellOutside: { opacity: 0.4 },
+  monthCellHead: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  monthCellNum: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 13 },
+  monthCellDots: { display: "flex", alignItems: "center", gap: 3, flexWrap: "wrap" },
+  monthDot: { width: 6, height: 6, borderRadius: "50%" },
+  iconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    border: `1px solid ${line}`,
+    background: paperCard,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    color: ink,
+  },
+  todayBtn: {
+    padding: "0 14px",
+    height: 32,
+    borderRadius: 8,
+    border: `1px solid ${line}`,
+    background: paperCard,
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: "pointer",
+    color: ink,
+    fontFamily: "inherit",
+  },
+  primaryBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "9px 16px",
+    borderRadius: 8,
+    border: "none",
+    background: ink,
+    color: "#fff",
+    fontSize: 13.5,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  ghostBtn: {
+    padding: "9px 16px",
+    borderRadius: 8,
+    border: `1px solid ${line}`,
+    background: "transparent",
+    color: ink,
+    fontSize: 13.5,
+    fontWeight: 500,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  dangerGhostBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "9px 14px",
+    borderRadius: 8,
+    border: "1px solid #E3B8B0",
+    background: "transparent",
+    color: "#A24E4E",
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  weekGrid: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 10 },
+  dayCol: {
+    background: paperCard,
+    borderRadius: 12,
+    border: `1px solid ${line}`,
+    padding: 10,
+    minHeight: 260,
+    display: "flex",
+    flexDirection: "column",
+  },
+  dayColToday: { borderColor: gold, boxShadow: `0 0 0 1px ${gold}` },
+  dayHead: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 },
+  dayName: {
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 10.5,
+    color: "#8A93A0",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
+  dayNum: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 18, marginTop: 1 },
+  dayNumToday: { color: "#9A7A0E" },
+  addDayBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    border: "none",
+    background: paper,
+    color: ink,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadBarTrack: { height: 3, background: paper, borderRadius: 2, marginBottom: 10, overflow: "hidden" },
+  loadBarFill: { height: "100%", background: teal, borderRadius: 2 },
+  dayEvents: { display: "flex", flexDirection: "column", gap: 6, flex: 1 },
+  absentRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 5,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTop: `1px dashed ${line}`,
+  },
+  absentNames: { fontSize: 11, color: "#9A6B4E", lineHeight: 1.4 },
+  emptyDay: { color: "#C3C8D1", fontSize: 12, textAlign: "center", marginTop: 20 },
+  eventCard: {
+    position: "relative",
+    background: paper,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  eventCardMain: {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    background: "transparent",
+    border: "none",
+    borderRadius: 8,
+    padding: "7px 24px 7px 9px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  eventShareBtn: {
+    position: "absolute",
+    top: 5,
+    right: 5,
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    border: "none",
+    background: "transparent",
+    color: "#9AA2AC",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shareChannelRow: { display: "flex", gap: 8, marginTop: 12 },
+  shareChannelBtn: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    padding: "9px 10px",
+    borderRadius: 8,
+    border: `1px solid ${line}`,
+    background: paperCard,
+    color: ink,
+    fontSize: 12.5,
+    fontWeight: 500,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    textDecoration: "none",
+  },
+  shareHint: { fontSize: 11.5, color: "#8A93A0", marginTop: 8, lineHeight: 1.4 },
+  eventTime: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 10.5,
+    color: "#6B7280",
+    marginBottom: 2,
+  },
+  eventTitle: { fontSize: 12.5, fontWeight: 600, color: ink, lineHeight: 1.3 },
+  eventLocation: {
+    display: "flex",
+    alignItems: "center",
+    gap: 3,
+    fontSize: 10.5,
+    color: "#6B7280",
+    marginTop: 2,
+  },
+  noteCard: {
+    textAlign: "left",
+    background: "#F3EFE3",
+    border: "none",
+    borderRadius: 8,
+    padding: "7px 9px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  noteHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 10,
+    color: "#9A7A0E",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    marginBottom: 3,
+  },
+  noteText: { fontSize: 12, color: "#3A3F4A", lineHeight: 1.35, whiteSpace: "pre-wrap" },
+  choiceCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+    borderRadius: 10,
+    border: `1px solid ${line}`,
+    background: paperCard,
+    cursor: "pointer",
+    textAlign: "left",
+    fontFamily: "inherit",
+    width: "100%",
+  },
+  choiceIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    background: paper,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    color: ink,
+  },
+  choiceLabel: { fontSize: 14, fontWeight: 600, color: ink },
+  choiceDesc: { fontSize: 12, color: "#8A93A0", marginTop: 1 },
+  avatarRow: { display: "flex", alignItems: "center", gap: 5, marginTop: 6 },
+  avatarName: { fontSize: 11, color: "#5A6270", fontWeight: 500 },
+  avatar: {
+    width: 18,
+    height: 18,
+    borderRadius: "50%",
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: 700,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupHead: { display: "flex", alignItems: "baseline", gap: 8, marginBottom: 12 },
+  groupLabel: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 15 },
+  groupCount: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: "#8A93A0" },
+  emptyGroup: { color: "#8A93A0", fontSize: 13, padding: "8px 0" },
+  peopleGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10 },
+  personCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: paperCard,
+    border: `1px solid ${line}`,
+    borderRadius: 10,
+    padding: 10,
+    cursor: "pointer",
+    textAlign: "left",
+    fontFamily: "inherit",
+    width: "100%",
+  },
+  personAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: "50%",
+    color: "#fff",
+    fontWeight: 700,
+    fontSize: 14,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  personName: { fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  personMeta: { fontSize: 11.5, color: "#8A93A0", marginTop: 2 },
+  absenceTag: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 11,
+    color: "#9A6B4E",
+    marginTop: 4,
+  },
+  absenceListItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: paperCard,
+    border: `1px solid ${line}`,
+    borderRadius: 8,
+    padding: "8px 10px",
+  },
+  smallIconBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    border: `1px solid ${line}`,
+    background: "transparent",
+    cursor: "pointer",
+    fontSize: 12,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: ink,
+    flexShrink: 0,
+  },
+  smallIconBtnDanger: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    border: "1px solid #E3B8B0",
+    background: "transparent",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#A24E4E",
+    flexShrink: 0,
+  },
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(20,22,27,0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 50,
+    padding: 20,
+  },
+  modal: {
+    background: paperCard,
+    borderRadius: 14,
+    width: 440,
+    maxWidth: "100%",
+    maxHeight: "90vh",
+    overflowY: "auto",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+  },
+  modalHead: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "18px 20px",
+    borderBottom: `1px solid ${line}`,
+  },
+  modalTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 16, margin: 0 },
+  modalBody: { padding: 20 },
+  modalFooter: { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 },
+  label: { display: "block", fontSize: 12, fontWeight: 600, color: "#5A6270", marginBottom: 6 },
+  input: {
+    width: "100%",
+    padding: "9px 11px",
+    borderRadius: 8,
+    border: `1px solid ${line}`,
+    fontSize: 13.5,
+    fontFamily: "inherit",
+    boxSizing: "border-box",
+    color: ink,
+  },
+  segmented: { display: "flex", border: `1px solid ${line}`, borderRadius: 8, overflow: "hidden" },
+  segBtn: {
+    flex: 1,
+    padding: "8px 0",
+    border: "none",
+    background: paperCard,
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 500,
+    color: "#5A6270",
+    fontFamily: "inherit",
+  },
+  segBtnActive: { background: ink, color: "#fff" },
+  colorRow: { display: "flex", gap: 8, flexWrap: "wrap" },
+  colorSwatch: { width: 26, height: 26, borderRadius: "50%", border: "none", cursor: "pointer" },
+  assigneeGroupLabel: {
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 10.5,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    color: "#8A93A0",
+    marginBottom: 5,
+  },
+  previewBox: {
+    marginTop: 10,
+    padding: "8px 10px",
+    background: paper,
+    borderRadius: 8,
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+  previewLine: { fontSize: 12.5, color: "#3A3F4A" },
+  absentWarning: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 11.5,
+    color: "#A24E4E",
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  assigneeList: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 },
+  assigneeChip: {
+    padding: "6px 12px",
+    borderRadius: 20,
+    border: `1px solid ${line}`,
+    background: paperCard,
+    fontSize: 12.5,
+    fontWeight: 500,
+    cursor: "pointer",
+    color: ink,
+    fontFamily: "inherit",
+  },
+  akteHead: { display: "flex", alignItems: "center", gap: 12, marginBottom: 18 },
+  akteHeadCrew: {
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 11,
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+    color: "#8A93A0",
+  },
+  akteDivider: { height: 1, background: line, margin: "18px 0" },
+  akteSectionLabel: {
+    fontFamily: "'Space Grotesk', sans-serif",
+    fontWeight: 600,
+    fontSize: 13.5,
+    marginBottom: 10,
+  },
+  akteEventLine: { fontSize: 12.5, color: "#3A3F4A" },
+  akteEventDate: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#8A93A0" },
+  absenceForm: { background: paper, borderRadius: 10, padding: 12 },
+};
