@@ -1,0 +1,110 @@
+:root {
+  color-scheme: light;
+}
+
+html, body {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    flex-direction: column !important;
+    min-height: 100dvh !important;
+  }
+
+  .sidebar {
+    width: 100% !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    padding: 10px 14px !important;
+    gap: 10px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .sidebar .brand,
+  .brand {
+    margin-bottom: 0 !important;
+    flex-shrink: 0;
+  }
+
+  .sidebar .nav-list,
+  .nav-list {
+    flex-direction: row !important;
+    gap: 4px !important;
+    flex: 1;
+  }
+
+  .nav-list button {
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+  }
+
+  .sidebar-spacer {
+    display: none !important;
+  }
+
+  .role-badge {
+    display: none !important;
+  }
+
+  .logout-btn {
+    padding: 8px !important;
+    width: auto !important;
+  }
+
+  .logout-btn span {
+    display: none;
+  }
+
+  .main-content {
+    padding: 16px 14px 28px !important;
+  }
+
+  .page-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+
+  .week-nav {
+    flex-wrap: wrap !important;
+    width: 100%;
+    gap: 6px !important;
+  }
+
+  .week-grid {
+    display: flex !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    gap: 10px !important;
+    padding-bottom: 6px;
+    margin: 0 -14px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .day-col {
+    min-width: 82vw !important;
+    scroll-snap-align: start;
+    flex-shrink: 0;
+  }
+
+  .month-grid {
+    gap: 4px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .day-col {
+    min-width: 88vw !important;
+  }
+}
