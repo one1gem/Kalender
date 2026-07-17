@@ -85,7 +85,8 @@ export default function Gate({ onDone }) {
       }
     } catch (e) {
       console.error(e);
-      setError("Verbindung fehlgeschlagen. Bitte Internet prüfen und erneut versuchen.");
+      setError("FEHLER: " + (e?.message || JSON.stringify(e)));
+
     } finally {
       setBusy(false);
     }
